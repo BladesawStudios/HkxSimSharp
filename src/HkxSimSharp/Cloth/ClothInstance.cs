@@ -260,18 +260,22 @@ internal sealed class ClothInstance
             float rotAngle = 2f * MathF.Acos(Math.Clamp(MathF.Abs(deltaRot.W), 0f, 1f));
             float rotateSpeed = rotAngle / dt;
 
-            // "Mostly rigid" (0.85) below a slow walk, easing down to "noticeably lagging" (0.35)
-            // past a run - the actual shape of the curve matters less than that it's neither 0
-            // (cloth never tracks the body at all) nor 1 (no lag ever, the original bug) at any
-            // real speed.
-            float translateBlend = transfer.TransferTranslationMotion
+            // The blend is the fraction of the actor's motion TRANSFERRED to the cloth - carried along
+            // rigidly with the body. Particles live in object space, so the transferred fraction is
+            // what needs NO correction; the rest is what must be undone so those particles keep their
+            // world position and lag. With transfer motion off - which is how TotK authors every piece
+            // checked - nothing is transferred: Havok simulates in world space and the cloth trails
+            // the actor completely, so the whole delta applies. This used to apply the blend itself,
+            // the other way round, which made "off" mean "perfectly rigid": dragging an actor about
+            // left its cloth frozen in place on the body.
+            float translateBlend = 1f - (transfer.TransferTranslationMotion
                 ? BlendFromSpeed(translateSpeed, transfer.MinTranslationSpeed, transfer.MaxTranslationSpeed,
                     transfer.MinTranslationBlend, transfer.MaxTranslationBlend)
-                : 0f;
-            float rotateBlend = transfer.TransferRotationMotion
+                : 0f);
+            float rotateBlend = 1f - (transfer.TransferRotationMotion
                 ? BlendFromSpeed(rotateSpeed, transfer.MinRotationSpeed, transfer.MaxRotationSpeed,
                     transfer.MinRotationBlend, transfer.MaxRotationBlend)
-                : 0f;
+                : 0f);
 
             Vector3 blendedTrans = deltaTrans * translateBlend;
             Quaternion blendedRot = Quaternion.Identity;
