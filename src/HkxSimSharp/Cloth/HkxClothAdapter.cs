@@ -208,6 +208,7 @@ public static class HkxClothAdapter
                 BoneAxis = UInt32(source, "boneAxis")
             },
             _ when source.ClassName.StartsWith("hclObjectSpaceSkin", StringComparison.Ordinal) => ReadSkinOperator(source),
+            _ when source.ClassName.StartsWith("hclBoneSpaceSkin", StringComparison.Ordinal) => ReadBoneSpaceSkinOperator(source),
             _ => null
         };
         if (result is not null)
@@ -243,7 +244,27 @@ public static class HkxClothAdapter
         Deformer = ReadDeformer(Field(source, "objectSpaceDeformer"), source)
     };
 
-    static HclObjectSpaceDeformer ReadDeformer(object? source, HkObject owner)
+    /// <summary>
+    /// <c>hclBoneSpaceSkin*Operator</c>: the skin Rope_1, Pod_C and Bag use in place of the object-space one. Each vertex
+    /// holds a position in the space of the bone it follows, so the skinned position is that position carried by the
+    /// bone's current transform - which is what the object-space path computes when its bone-from-skin-mesh
+    /// matrices are identity, so the operator is read into the same type with those. Dropped, the piece's reference
+    /// buffer is never written, and the anchors that read it sit at the origin.
+    /// </summary>
+    static HclObjectSpaceSkinOperator ReadBoneSpaceSkinOperator(HkObject source)
+    {
+        ushort[] subset = Array<ushort>(source, "transformSubset");
+        return new HclObjectSpaceSkinOperator
+        {
+            BoneFromSkinMeshTransforms = Enumerable.Repeat(Matrix4x4.Identity, subset.Length).ToArray(),
+            TransformSubset = subset,
+            OutputBufferIndex = UInt32(source, "outputBufferIndex"),
+            TransformSetIndex = UInt32(source, "transformSetIndex"),
+            Deformer = ReadDeformer(Field(source, "boneSpaceDeformer"), source, weightsInLocalW: true)
+        };
+    }
+
+    static HclObjectSpaceDeformer ReadDeformer(object? source, HkObject owner, bool weightsInLocalW = false)
     {
         string[] names = ["oneBlendEntries", "twoBlendEntries", "threeBlendEntries", "fourBlendEntries",
             "fiveBlendEntries", "sixBlendEntries", "sevenBlendEntries", "eightBlendEntries"];
@@ -267,6 +288,9 @@ public static class HkxClothAdapter
             ControlBytes = Array<byte>(source, "controlBytes"),
             PackedLocalPositions = Items(owner, "localPs").Select(x => Vector3Array(Field(x, "localPosition"))).ToArray(),
             UnpackedLocalPositions = Items(owner, "localUnpackedPs").Select(x => Vector3Array(Field(x, "localPosition"))).ToArray(),
+            WeightsInLocalW = weightsInLocalW,
+            PackedLocalWeights = weightsInLocalW ? Items(owner, "localPs").Select(x => LocalW(Field(x, "localPosition"))).ToArray() : [],
+            UnpackedLocalWeights = weightsInLocalW ? Items(owner, "localUnpackedPs").Select(x => LocalW(Field(x, "localPosition"))).ToArray() : [],
             StartVertexIndex = UInt16(source, "startVertexIndex"),
             EndVertexIndex = UInt16(source, "endVertexIndex"),
             PartialWrite = Bool(source, "partialWrite")
@@ -395,6 +419,12 @@ public static class HkxClothAdapter
 
     static Vector3 Vector3(object? value)
     {
+        // An hkPackedVector3 arrives from HkxSharp as a struct with one member, "values": four s16s. Without this the
+        // packed local positions of an hclObjectSpaceSkinPOperator came back as zeros, which put every anchor of a
+        // cloth piece on its bone's origin.
+        if (value is HkStruct wrapped && wrapped.Members.Any(m => m.Name == "values"))
+            value = wrapped["values"];
+
         if (value is short[] packed && packed.Length >= 4)
         {
             var (x, y, z) = HkPackedVector3.Unpack(packed);
@@ -410,6 +440,15 @@ public static class HkxClothAdapter
     {
         float[] f = Floats(value);
         return f.Length >= 4 ? new Vector4(f[0], f[1], f[2], f[3]) : System.Numerics.Vector4.Zero;
+    }
+
+    /// <summary>The w of each float4 of a local-position array: a bone-space deformer's blend weights.</summary>
+    static float[] LocalW(object? value)
+    {
+        if (value is not float[] f || f.Length % 4 != 0) return [];
+        var result = new float[f.Length / 4];
+        for (int i = 0; i < result.Length; i++) result[i] = f[i * 4 + 3];
+        return result;
     }
 
     static Vector3[] Vector3Array(object? value)

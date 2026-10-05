@@ -496,9 +496,9 @@ internal sealed class ClothInstance
 
         int[] nextBlock = new int[8];
         int localBlock = 0;
-        Vector3[][] locals = d.PackedLocalPositions.Length > 0
-            ? d.PackedLocalPositions
-            : d.UnpackedLocalPositions;
+        bool packed = d.PackedLocalPositions.Length > 0;
+        Vector3[][] locals = packed ? d.PackedLocalPositions : d.UnpackedLocalPositions;
+        float[][] localWeights = packed ? d.PackedLocalWeights : d.UnpackedLocalWeights;
 
         foreach (byte control in d.ControlBytes)
         {
@@ -521,12 +521,39 @@ internal sealed class ClothInstance
             var available = d.BlendBlocks[influences - 1];
             if ((uint)blockIndex >= (uint)available.Length) return false;
             var block = available[blockIndex];
-            Vector3[] localPositions = locals[localBlock++];
+            Vector3[] localPositions = locals[localBlock];
+            float[] weightsInW = d.WeightsInLocalW && localBlock < localWeights.Length ? localWeights[localBlock] : [];
+            localBlock++;
 
-            for (int vertex = 0; vertex < 16; vertex++)
+            // A bone-space block holds 16 / influences vertices; the object-space ones are read as 16 throughout.
+            int vertexCount = d.WeightsInLocalW ? Math.Min(16, block.VertexIndices.Length) : 16;
+            for (int vertex = 0; vertex < vertexCount; vertex++)
             {
                 int outputIndex = block.VertexIndices[vertex];
                 if ((uint)outputIndex >= (uint)output.Length) continue;
+
+                if (d.WeightsInLocalW)
+                {
+                    // Each influence is its own local position, its w the weight: the sum of the bone-carried positions.
+                    // A slot whose weights are all zero is padding (the last vertex repeated) and must not overwrite.
+                    Vector3 sum = Vector3.Zero;
+                    float total = 0f;
+                    for (int influence = 0; influence < influences; influence++)
+                    {
+                        int entry = vertex * influences + influence;
+                        if ((uint)entry >= (uint)localPositions.Length || (uint)entry >= (uint)weightsInW.Length || entry >= block.BoneIndices.Length) continue;
+
+                        float weight = weightsInW[entry];
+                        if (weight == 0f) continue;
+
+                        int bone = block.BoneIndices[entry];
+                        if ((uint)bone >= (uint)composites.Length) return false;
+                        sum += weight * Vector3.Transform(localPositions[entry], composites[bone]);
+                        total += weight;
+                    }
+                    if (total > 1e-6f) output[outputIndex] = sum;
+                    continue;
+                }
 
                 Matrix4x4 blended = default;
                 int influenceBase = vertex * influences;

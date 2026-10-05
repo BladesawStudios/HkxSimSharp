@@ -94,6 +94,16 @@ public sealed class HclObjectSpaceDeformer
     public byte[] ControlBytes { get; set; } = Array.Empty<byte>();
     public Vector3[][] PackedLocalPositions { get; set; } = Array.Empty<Vector3[]>();
     public Vector3[][] UnpackedLocalPositions { get; set; } = Array.Empty<Vector3[]>();
+
+    /// <summary>
+    /// A bone-space deformer (<c>hclBoneSpaceSkin*Operator</c>) keeps no weight table: its local positions are one float4
+    /// per vertex-and-influence, laid out vertex-major, and each one's w is that influence's weight. When set, the
+    /// <see cref="PackedLocalWeights"/>/<see cref="UnpackedLocalWeights"/> hold those w values, indexed like the positions,
+    /// and a block holds 16 / influences vertices rather than 16.
+    /// </summary>
+    public bool WeightsInLocalW { get; set; }
+    public float[][] PackedLocalWeights { get; set; } = Array.Empty<float[]>();
+    public float[][] UnpackedLocalWeights { get; set; } = Array.Empty<float[]>();
     public ushort StartVertexIndex { get; set; }
     public ushort EndVertexIndex { get; set; }
     public bool PartialWrite { get; set; }
