@@ -1,0 +1,3 @@
+[submodule "lib/HkxSharp"]
+	path = lib/HkxSharp
+	url = https://github.com/BladesawStudios/HkxSharp

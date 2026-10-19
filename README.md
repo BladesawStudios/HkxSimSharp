@@ -50,15 +50,7 @@ dependency on Marrow, OpenGL, UI frameworks, or Tears of the Kingdom file wrappe
 
 ## Building
 
-The sibling repositories are expected in this layout while both packages are under active development:
-
-```text
-Libraries/
-├── HkxSharp/
-└── HkxSimSharp/
-```
-
-Then run:
+HkxSharp is a submodule in `lib`; clone with `--recursive`, then run:
 
 ```text
 dotnet build HkxSimSharp.slnx
