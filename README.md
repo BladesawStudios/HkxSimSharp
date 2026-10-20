@@ -22,6 +22,8 @@ The first module is `HkxSimSharp.Cloth`. It currently includes:
 - object-space skinning, vertex gathering, fixed-particle movement, and mesh-bone deformation;
 - embedded HKA skeleton conversion.
 
+The second module is `HkxSimSharp.Ragdoll`: rigid capsules joined at their bones with cone, twist, plane and hinge limits, falling under gravity onto a floor (`RagdollWorld`). It is a position-based drop test of a ragdoll's masses, sizes and limits, not Havok's solver.
+
 Unsupported HCL constraint types are retained as placeholders so authored constraint indices remain
 correct. Additional Havok systems can be added as sibling modules without making the cloth API the
 root abstraction of the package.
