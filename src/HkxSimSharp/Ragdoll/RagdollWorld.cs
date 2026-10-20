@@ -37,6 +37,7 @@ public sealed class RagdollWorld
     private readonly Quaternion[] _turn, _turnPrevious, _rest;
     private readonly float[] _inverseMass, _inverseInertia;
     private readonly bool[] _onFloor, _released;
+    private readonly float[] _floorPush;
     private int _calm;
 
     public RagdollWorld(IReadOnlyList<RagdollBody> bodies, IReadOnlyList<Matrix4x4> frames)
@@ -56,6 +57,7 @@ public sealed class RagdollWorld
         _inverseInertia = new float[n];
         _onFloor = new bool[n];
         _released = new bool[n];
+        _floorPush = new float[n];
 
         for (int i = 0; i < n; i++)
         {
@@ -69,9 +71,23 @@ public sealed class RagdollWorld
     }
 
     // Gravity, and the floor: the plane of points whose dot with FloorNormal is FloorHeight.
-    public Vector3 Gravity { get; set; } = new(0, -9.81f, 0);
+    public Vector3 Gravity { get; set; } = new(0, -9.8f, 0);
 
     public Vector3 FloorNormal { get; set; } = Vector3.UnitY;
+
+    // How much speed a body loses each second, as the game's motion properties give it: the Default set has no linear damping and 0.025 angular, a player's ragdoll 0.2 and 0.8. The game's own gravity is the
+    // Havok world's default, 9.8 m/s^2 down (read from the physics module's defaults), and a ragdoll body has a gravity scale of 1.
+    public float LinearDamping { get; set; } = 0f;
+
+    public float AngularDamping { get; set; } = 0.025f;
+
+    // What a joint takes out of the turning of the body that hangs from it, per second; the game's joints have a friction of their own which is not read here.
+    public float JointDamping { get; set; } = 1f;
+
+    // How hard the floor rubs a sliding body (the coefficient of friction), and how much it slows one that is rolling, per second.
+    public float FloorFriction { get; set; } = 0.6f;
+
+    public float FloorRolling { get; set; } = 4f;
 
     public float FloorHeight { get; set; }
 
@@ -170,6 +186,7 @@ public sealed class RagdollWorld
                 Quaternion spin = new(_spin[i] * 0.5f * h, 0f);
                 _turn[i] = Quaternion.Normalize(_turn[i] + spin * _turn[i]);
                 _onFloor[i] = false;
+                _floorPush[i] = 0f;
             }
 
             for (int k = 0; k < Iterations; k++)
@@ -194,14 +211,16 @@ public sealed class RagdollWorld
                 float turning = _spin[i].Length();
                 if (turning > MaxSpin) _spin[i] *= MaxSpin / turning;
 
-                // What is lost to the air and to the joints' friction, and what slides on the floor.
-                _velocity[i] *= 0.9985f;
-                _spin[i] *= 0.995f;
+                // What is lost to the motion's damping, per second as the game's motion properties give it, to the joint it hangs from, and to rubbing on the floor.
+                _velocity[i] *= MathF.Max(0f, 1f - LinearDamping * h);
+                _spin[i] *= MathF.Max(0f, 1f - (AngularDamping + (_bodies[i].Parent >= 0 && !_released[i] ? JointDamping : 0f)) * h);
                 if (_onFloor[i])
                 {
+                    // Coulomb friction: the speed along the floor falls by at most the friction coefficient times what the floor pushed the body up by.
                     Vector3 along = _velocity[i] - FloorNormal * Vector3.Dot(_velocity[i], FloorNormal);
-                    _velocity[i] -= along * 0.15f;
-                    _spin[i] *= 0.9f;
+                    float speed = along.Length(), lost = MathF.Min(speed, FloorFriction * _floorPush[i] / h);
+                    if (speed > 1e-6f) _velocity[i] -= along / speed * lost;
+                    _spin[i] *= MathF.Max(0f, 1f - FloorRolling * h);
 
                     // What is nearly still on the floor stays still, so the pile does not shiver.
                     if (_velocity[i].LengthSquared() < 0.0036f) _velocity[i] = Vector3.Zero;
@@ -271,6 +290,7 @@ public sealed class RagdollWorld
         Vector3 r = Vector3.Transform(end - _centre[i], _turn[i]), n = FloorNormal;
         Move(i, r, n * (depth / Weight(i, r, n)));
         _onFloor[i] = true;
+        _floorPush[i] = MathF.Max(_floorPush[i], depth);
     }
 
     // How readily a body gives to a push along a direction at a point r from its centre: the inverse mass and the turn it would take.
