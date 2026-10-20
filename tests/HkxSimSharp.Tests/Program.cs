@@ -7,6 +7,7 @@ using HkxSimSharp.Ragdoll;
 
 SmokeTestEmptyDefinition();
 TestRagdollDropsAndSettles();
+TestRagdollStartingInTheFloorIsNotThrown();
 
 if (args.Length > 0)
     IntegrationTestHkxSharp(args[0]);
@@ -88,4 +89,25 @@ static void TestRagdollDropsAndSettles()
     apart.Release();
     for (int i = 0; i < 600; i++) apart.Step(1f / 60f);
     for (int i = 0; i < 3; i++) Assert(apart.FrameOf(i).Translation.Y > -0.01f && apart.FrameOf(i).Translation.Y < 0.3f, $"Piece {i} did not come to the floor.");
+}
+
+// A connected ragdoll posed with its feet in the floor, and with limits that do not include the pose it is in, does not shoot up: nothing rises above where it began.
+static void TestRagdollStartingInTheFloorIsNotThrown()
+{
+    RagdollJoint joint = new(0.8f, 0f, 0.2f, 0.6f, 0.1f, 0.5f);
+    RagdollBody[] bodies =
+    [
+        new(-1, new Vector3(0, 0, 0), new Vector3(0, 0.4f, 0), 0.1f, 10f, null),
+        new(0, new Vector3(0, 0, 0), new Vector3(0, 0.4f, 0), 0.08f, 5f, joint),
+        new(1, new Vector3(0, 0, 0), new Vector3(0, 0.4f, 0), 0.06f, 3f, joint),
+    ];
+    Matrix4x4[] frames = [.. Enumerable.Range(0, 3).Select(i => Matrix4x4.CreateTranslation(0, 0.4f * i - 0.05f, 0))];
+    var world = new RagdollWorld(bodies, frames);
+    float highest = float.MinValue;
+    for (int step = 0; step < 240; step++)
+    {
+        world.Step(1f / 120f);
+        for (int i = 0; i < 3; i++) highest = MathF.Max(highest, world.FrameOf(i).Translation.Y + 0.4f);
+    }
+    Assert(highest < 1.2f + 0.2f, $"A ragdoll that began in the floor was thrown up to {highest}.");
 }

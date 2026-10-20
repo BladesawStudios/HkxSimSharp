@@ -112,19 +112,24 @@ public sealed class RagdollWorld
     // True once the ragdoll has lain still for half a second: it is not stepped any more, so a pile on the floor does not shiver. Reset wakes it.
     public bool Asleep { get; private set; }
 
-    // Moves every body out of the floor without giving it any speed, for a ragdoll whose pose has its feet in the ground. Done on the first step, since the floor is set after the world is made.
+    // Lifts the whole ragdoll clear of the floor, as one, for a pose whose feet are in the ground: every joint stays as it was, and no body is given any speed. Done on the first step, since the floor is
+    // set after the world is made.
     private bool _settled;
 
     private void Settle()
     {
         _settled = true;
-        for (int k = 0; k < Iterations; k++)
-            for (int i = 0; i < _bodies.Length; i++) Floor(i);
+        float deepest = 0f;
         for (int i = 0; i < _bodies.Length; i++)
         {
+            deepest = MathF.Max(deepest, Depth(i, _bodies[i].A));
+            deepest = MathF.Max(deepest, Depth(i, _bodies[i].B));
+        }
+        for (int i = 0; i < _bodies.Length; i++)
+        {
+            _position[i] += FloorNormal * deepest;
             _previous[i] = _position[i];
             _turnPrevious[i] = _turn[i];
-            _onFloor[i] = false;
         }
     }
 
@@ -242,13 +247,16 @@ public sealed class RagdollWorld
         PushOutOfFloor(i, body.B);
     }
 
+    // How far the capsule's round end at that point of a body is into the floor; negative where it is clear.
+    private float Depth(int i, Vector3 end) =>
+        _bodies[i].Radius - (Vector3.Dot(_position[i] + Vector3.Transform(end - _centre[i], _turn[i]), FloorNormal) - FloorHeight);
+
     private void PushOutOfFloor(int i, Vector3 end)
     {
-        Vector3 r = Vector3.Transform(end - _centre[i], _turn[i]);
-        float depth = _bodies[i].Radius - (Vector3.Dot(_position[i] + r, FloorNormal) - FloorHeight);
+        float depth = Depth(i, end);
         if (depth <= 0f) return;
 
-        Vector3 n = FloorNormal;
+        Vector3 r = Vector3.Transform(end - _centre[i], _turn[i]), n = FloorNormal;
         Move(i, r, n * (depth / Weight(i, r, n)));
         _onFloor[i] = true;
     }
