@@ -83,6 +83,18 @@ public sealed class RagdollWorld
         foreach (int i in bodies ?? Enumerable.Range(0, _bodies.Length)) if ((uint)i < (uint)_released.Length) _released[i] = true;
     }
 
+    // A sudden push on a body: an impulse (newton seconds) at a point of space, which gives it speed along the impulse and a spin about its centre as the point is off it.
+    public void ApplyImpulse(int body, Vector3 point, Vector3 impulse)
+    {
+        _velocity[body] += impulse * _inverseMass[body];
+        _spin[body] += Vector3.Cross(point - _position[body], impulse) * _inverseInertia[body];
+        Asleep = false;
+        _calm = 0;
+    }
+
+    // Where a body's centre is, in the space the world works in.
+    public Vector3 CentreOf(int body) => _position[body];
+
     // Puts every body where a pose has its frame, at rest.
     public void Reset(IReadOnlyList<Matrix4x4> frames)
     {
