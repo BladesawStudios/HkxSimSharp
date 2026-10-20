@@ -267,17 +267,19 @@ public sealed class RagdollWorld
     private void Floor(int i)
     {
         RagdollBody body = _bodies[i];
-        foreach (Vector3 end in new[] { body.A, body.B })
-        {
-            Vector3 r = Vector3.Transform(end - _centre[i], _turn[i]);
-            float depth = body.Radius - (Vector3.Dot(_position[i] + r, FloorNormal) - FloorHeight);
-            if (depth <= 0f) continue;
+        PushOutOfFloor(i, body.A);
+        PushOutOfFloor(i, body.B);
+    }
 
-            Vector3 n = FloorNormal;
-            float w = Weight(i, r, n);
-            Move(i, r, n * (depth / w));
-            _onFloor[i] = true;
-        }
+    private void PushOutOfFloor(int i, Vector3 end)
+    {
+        Vector3 r = Vector3.Transform(end - _centre[i], _turn[i]);
+        float depth = _bodies[i].Radius - (Vector3.Dot(_position[i] + r, FloorNormal) - FloorHeight);
+        if (depth <= 0f) return;
+
+        Vector3 n = FloorNormal;
+        Move(i, r, n * (depth / Weight(i, r, n)));
+        _onFloor[i] = true;
     }
 
     // How readily a body gives to a push along a direction at a point r from its centre: the inverse mass and the turn it would take.
