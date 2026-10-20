@@ -30,12 +30,14 @@ public sealed record RagdollBody(int Parent, Vector3 A, Vector3 B, float Radius,
 public sealed class RagdollWorld
 {
     private const int SubSteps = 6, Iterations = 6;
+    private const float MaxSpeed = 15f, MaxSpin = 30f;
 
     private readonly RagdollBody[] _bodies;
     private readonly Vector3[] _centre, _position, _previous, _velocity, _spin, _jointParent;
     private readonly Quaternion[] _turn, _turnPrevious, _rest;
     private readonly float[] _inverseMass, _inverseInertia;
     private readonly bool[] _onFloor, _released;
+    private int _calm;
 
     public RagdollWorld(IReadOnlyList<RagdollBody> bodies, IReadOnlyList<Matrix4x4> frames)
     {
@@ -102,6 +104,28 @@ public sealed class RagdollWorld
             Vector3 anchor = _position[i] + Vector3.Transform(-_centre[i], _turn[i]);
             _jointParent[i] = Vector3.Transform(anchor - _position[parent], Quaternion.Conjugate(_turn[parent]));
         }
+        _calm = 0;
+        Asleep = false;
+        _settled = false;
+    }
+
+    // True once the ragdoll has lain still for half a second: it is not stepped any more, so a pile on the floor does not shiver. Reset wakes it.
+    public bool Asleep { get; private set; }
+
+    // Moves every body out of the floor without giving it any speed, for a ragdoll whose pose has its feet in the ground. Done on the first step, since the floor is set after the world is made.
+    private bool _settled;
+
+    private void Settle()
+    {
+        _settled = true;
+        for (int k = 0; k < Iterations; k++)
+            for (int i = 0; i < _bodies.Length; i++) Floor(i);
+        for (int i = 0; i < _bodies.Length; i++)
+        {
+            _previous[i] = _position[i];
+            _turnPrevious[i] = _turn[i];
+            _onFloor[i] = false;
+        }
     }
 
     // Where a body's frame, which is its bone's, is now.
@@ -114,6 +138,9 @@ public sealed class RagdollWorld
 
     public void Step(float seconds)
     {
+        if (Asleep) return;
+        if (!_settled) Settle();
+
         float h = seconds / SubSteps;
         for (int s = 0; s < SubSteps; s++)
         {
@@ -140,9 +167,15 @@ public sealed class RagdollWorld
             for (int i = 0; i < _bodies.Length; i++)
             {
                 _velocity[i] = (_position[i] - _previous[i]) / h;
+
+                // What the solver pushed a body by is not a speed it should leave with: a pose out of its limits or a foot in the floor must not throw it.
+                float fastest = _velocity[i].Length();
+                if (fastest > MaxSpeed) _velocity[i] *= MaxSpeed / fastest;
                 Quaternion delta = _turn[i] * Quaternion.Conjugate(_turnPrevious[i]);
                 if (delta.W < 0f) delta = new Quaternion(-delta.X, -delta.Y, -delta.Z, -delta.W);
                 _spin[i] = new Vector3(delta.X, delta.Y, delta.Z) * (2f / h);
+                float turning = _spin[i].Length();
+                if (turning > MaxSpin) _spin[i] *= MaxSpin / turning;
 
                 // What is lost to the air and to the joints' friction, and what slides on the floor.
                 _velocity[i] *= 0.9985f;
@@ -159,6 +192,11 @@ public sealed class RagdollWorld
                 }
             }
         }
+
+        float movement = 0f;
+        for (int i = 0; i < _bodies.Length; i++) movement = MathF.Max(movement, MathF.Max(_velocity[i].Length(), _spin[i].Length() * _bodies[i].Radius));
+        _calm = movement < 0.15f ? _calm + 1 : 0;
+        if (_calm >= 60) Asleep = true;
     }
 
     // Keeps a body hanging from its parent at the joint, and within the joint's limits.
