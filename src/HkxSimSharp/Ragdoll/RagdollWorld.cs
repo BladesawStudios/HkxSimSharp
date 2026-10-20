@@ -30,7 +30,7 @@ public sealed record RagdollBody(int Parent, Vector3 A, Vector3 B, float Radius,
 public sealed class RagdollWorld
 {
     private const int SubSteps = 6, Iterations = 6;
-    private const float MaxSpeed = 15f, MaxSpin = 30f;
+    private const float MaxSpeed = 120f, MaxSpin = 60f;
 
     private readonly RagdollBody[] _bodies;
     private readonly Vector3[] _centre, _position, _previous, _velocity, _spin, _jointParent;
@@ -99,13 +99,68 @@ public sealed class RagdollWorld
         foreach (int i in bodies ?? Enumerable.Range(0, _bodies.Length)) if ((uint)i < (uint)_released.Length) _released[i] = true;
     }
 
-    // A sudden push on a body: an impulse (newton seconds) at a point of space, which gives it speed along the impulse and a spin about its centre as the point is off it.
+    // A sudden push: an impulse (newton seconds) at a point of space. The joints answer a blow at once, so the body struck does not run off alone and be pulled back: every body held to it by joints that are not let go
+    // takes the blow together, as one rigid piece, moving with the speed of its centre of mass and turning about it. A body let go of the rest is pushed alone.
     public void ApplyImpulse(int body, Vector3 point, Vector3 impulse)
     {
-        _velocity[body] += impulse * _inverseMass[body];
-        _spin[body] += Vector3.Cross(point - _position[body], impulse) * _inverseInertia[body];
         Asleep = false;
         _calm = 0;
+
+        List<int> group = Joined(body);
+        if (group.Count == 1)
+        {
+            _velocity[body] += impulse * _inverseMass[body];
+            _spin[body] += Vector3.Cross(point - _position[body], impulse) * _inverseInertia[body];
+            return;
+        }
+
+        // The centre of mass and the inertia of the whole piece about it.
+        float mass = 0f;
+        Vector3 centre = Vector3.Zero;
+        foreach (int i in group)
+        {
+            mass += 1f / _inverseMass[i];
+            centre += _position[i] / _inverseMass[i];
+        }
+        centre /= mass;
+
+        System.Numerics.Matrix4x4 inertia = System.Numerics.Matrix4x4.Identity;
+        float[,] tensor = new float[3, 3];
+        foreach (int i in group)
+        {
+            float m = 1f / _inverseMass[i], own = 1f / _inverseInertia[i];
+            Vector3 d = _position[i] - centre;
+            float[] a = [d.X, d.Y, d.Z];
+            for (int r = 0; r < 3; r++)
+                for (int c = 0; c < 3; c++) tensor[r, c] += (r == c ? own + m * d.LengthSquared() : 0f) - m * a[r] * a[c];
+        }
+        inertia = new System.Numerics.Matrix4x4(tensor[0, 0], tensor[0, 1], tensor[0, 2], 0, tensor[1, 0], tensor[1, 1], tensor[1, 2], 0, tensor[2, 0], tensor[2, 1], tensor[2, 2], 0, 0, 0, 0, 1);
+
+        Vector3 moment = Vector3.Cross(point - centre, impulse), turn = Vector3.Zero;
+        if (System.Numerics.Matrix4x4.Invert(inertia, out System.Numerics.Matrix4x4 inverse)) turn = Vector3.Transform(moment, inverse);
+
+        Vector3 speed = impulse / mass;
+        foreach (int i in group)
+        {
+            _velocity[i] += speed + Vector3.Cross(turn, _position[i] - centre);
+            _spin[i] += turn;
+        }
+    }
+
+    // The bodies held to a body by joints that are in force, the body among them.
+    private List<int> Joined(int body)
+    {
+        int Top(int i)
+        {
+            while (_bodies[i].Parent >= 0 && !_released[i]) i = _bodies[i].Parent;
+            return i;
+        }
+
+        int top = Top(body);
+        List<int> group = [];
+        for (int i = 0; i < _bodies.Length; i++)
+            if (Top(i) == top) group.Add(i);
+        return group;
     }
 
     // Where a body's centre is, in the space the world works in.
