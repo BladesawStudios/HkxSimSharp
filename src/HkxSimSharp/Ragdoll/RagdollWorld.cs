@@ -6,10 +6,10 @@ namespace HkxSimSharp.Ragdoll;
 /// <remarks>
 /// A joint is a ball at the origin of the body's frame, so the body hangs from its parent at a point. Twist is the turn about the body's X axis, within <see cref="TwistMin"/> and <see cref="TwistMax"/>.
 /// What is left of the rotation is a swing, taken as turns about Y and Z: the one about Z is within <see cref="PlaneMin"/> and <see cref="PlaneMax"/>, and the whole swing is within <see cref="ConeAngle"/> as a circle,
-/// as Havok's ragdoll limits are described. <see cref="ConeOffset"/> is kept but not used: where the game centres the cone could not be found in its code, so the cone is centred on the rest pose. A hinge turns only about Z, within <see cref="HingeMin"/> and <see cref="HingeMax"/>. This is how the game's ragdoll parameters are named, read as
+/// as Havok's ragdoll limits are described. <see cref="ConeOffset"/> is kept but not used: where the game centres the cone could not be found in its code, so the cone is centred on the rest pose. A hinge turns only about its axis (<see cref="HingeAxis"/>, Z where none is given - the game's parameter names one of six, and builds the hinge's frame from it), within <see cref="HingeMin"/> and <see cref="HingeMax"/>. This is how the game's ragdoll parameters are named, read as
 /// the simplest limits that fit the names; Havok's own cone is not an exact match.
 /// </remarks>
-public sealed record RagdollJoint(float ConeAngle, float ConeOffset, float TwistMin, float TwistMax, float PlaneMin, float PlaneMax, bool Hinge = false, float HingeMin = 0f, float HingeMax = 0f);
+public sealed record RagdollJoint(float ConeAngle, float ConeOffset, float TwistMin, float TwistMax, float PlaneMin, float PlaneMax, bool Hinge = false, float HingeMin = 0f, float HingeMax = 0f, Vector3? HingeAxis = null);
 
 /// <summary>One rigid body of a ragdoll: a capsule in the frame of the bone it is on, its mass, and the joint to its parent.</summary>
 /// <remarks>Parent is the index of the parent body in the list given to <see cref="RagdollWorld"/>, which comes before it, or -1 for a body that is free. Joint is null for a free body.</remarks>
@@ -189,11 +189,12 @@ public sealed class RagdollWorld
         Vector3 swingVector = RotationVector(swing);
         (float y, float z) = (swingVector.Y, swingVector.Z);
 
+        Quaternion allowed;
         if (joint.Hinge)
         {
-            twistAngle = 0f;
-            y = 0f;
-            z = Math.Clamp(z, joint.HingeMin, joint.HingeMax);
+            // The whole of the turn that is about the hinge's axis, kept within its limits, and no other.
+            Vector3 axis = joint.HingeAxis is { } a && a.LengthSquared() > 1e-8f ? Vector3.Normalize(a) : Vector3.UnitZ;
+            allowed = FromRotationVector(axis * Math.Clamp(Vector3.Dot(RotationVector(deviation), axis), joint.HingeMin, joint.HingeMax));
         }
         else
         {
@@ -208,9 +209,8 @@ public sealed class RagdollWorld
                 y *= shrink;
                 z *= shrink;
             }
+            allowed = FromRotationVector(new Vector3(0f, y, z)) * Quaternion.CreateFromAxisAngle(Vector3.UnitX, twistAngle);
         }
-
-        Quaternion allowed = FromRotationVector(new Vector3(0f, y, z)) * Quaternion.CreateFromAxisAngle(Vector3.UnitX, twistAngle);
         Quaternion wanted = _turn[p] * _rest[i] * allowed;
         Quaternion correction = wanted * Quaternion.Conjugate(_turn[i]);
         if (Math.Abs(correction.W) > 0.99999f) return;
