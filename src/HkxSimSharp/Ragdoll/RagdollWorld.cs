@@ -223,36 +223,7 @@ public sealed class RagdollWorld
         Quaternion deviation = Quaternion.Conjugate(_rest[i]) * relative;
         if (deviation.W < 0f) deviation = new Quaternion(-deviation.X, -deviation.Y, -deviation.Z, -deviation.W);
 
-        Quaternion twist = new(deviation.X, 0f, 0f, deviation.W);
-        twist = twist.LengthSquared() > 1e-10f ? Quaternion.Normalize(twist) : Quaternion.Identity;
-        Quaternion swing = deviation * Quaternion.Conjugate(twist);
-
-        float twistAngle = 2f * MathF.Atan2(twist.X, twist.W);
-        Vector3 swingVector = RotationVector(swing);
-        (float y, float z) = (swingVector.Y, swingVector.Z);
-
-        Quaternion allowed;
-        if (joint.Hinge)
-        {
-            // The whole of the turn that is about the hinge's axis, kept within its limits, and no other.
-            Vector3 axis = joint.HingeAxis is { } a && a.LengthSquared() > 1e-8f ? Vector3.Normalize(a) : Vector3.UnitZ;
-            allowed = FromRotationVector(axis * Math.Clamp(Vector3.Dot(RotationVector(deviation), axis), joint.HingeMin, joint.HingeMax));
-        }
-        else
-        {
-            twistAngle = Math.Clamp(twistAngle, joint.TwistMin, joint.TwistMax);
-
-            // The plane limit bounds the turn about Z, and the cone the whole swing, as a circle: the angle between the two twist axes is at most the cone angle.
-            z = Math.Clamp(z, joint.PlaneMin, joint.PlaneMax);
-            float swingAngle = MathF.Sqrt(y * y + z * z);
-            if (swingAngle > joint.ConeAngle && swingAngle > 1e-6f)
-            {
-                float shrink = joint.ConeAngle / swingAngle;
-                y *= shrink;
-                z *= shrink;
-            }
-            allowed = FromRotationVector(new Vector3(0f, y, z)) * Quaternion.CreateFromAxisAngle(Vector3.UnitX, twistAngle);
-        }
+        Quaternion allowed = JointLimit.Clamp(joint, deviation);
         Quaternion wanted = _turn[p] * _rest[i] * allowed;
         Quaternion correction = wanted * Quaternion.Conjugate(_turn[i]);
         if (Math.Abs(correction.W) > 0.99999f) return;
@@ -295,20 +266,5 @@ public sealed class RagdollWorld
         _position[i] += push * _inverseMass[i];
         Vector3 turn = Vector3.Cross(r, push) * _inverseInertia[i];
         _turn[i] = Quaternion.Normalize(_turn[i] + new Quaternion(turn * 0.5f, 0f) * _turn[i]);
-    }
-
-    private static Vector3 RotationVector(Quaternion q)
-    {
-        if (q.W < 0f) q = new Quaternion(-q.X, -q.Y, -q.Z, -q.W);
-        float s = MathF.Sqrt(q.X * q.X + q.Y * q.Y + q.Z * q.Z);
-        if (s < 1e-6f) return Vector3.Zero;
-
-        return new Vector3(q.X, q.Y, q.Z) / s * (2f * MathF.Atan2(s, q.W));
-    }
-
-    private static Quaternion FromRotationVector(Vector3 v)
-    {
-        float angle = v.Length();
-        return angle < 1e-6f ? Quaternion.Identity : Quaternion.CreateFromAxisAngle(v / angle, angle);
     }
 }
