@@ -152,6 +152,10 @@ public sealed class RagdollWorld
                     Vector3 along = _velocity[i] - FloorNormal * Vector3.Dot(_velocity[i], FloorNormal);
                     _velocity[i] -= along * 0.15f;
                     _spin[i] *= 0.9f;
+
+                    // What is nearly still on the floor stays still, so the pile does not shiver.
+                    if (_velocity[i].LengthSquared() < 0.0036f) _velocity[i] = Vector3.Zero;
+                    if (_spin[i].LengthSquared() < 0.04f) _spin[i] = Vector3.Zero;
                 }
             }
         }
