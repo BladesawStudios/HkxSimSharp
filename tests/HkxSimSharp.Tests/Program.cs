@@ -82,4 +82,10 @@ static void TestRagdollDropsAndSettles()
         Assert(Vector3.Distance(world.FrameOf(i).Translation, world.FrameOf(i - 1).Translation) < 0.6f, "A joint came apart.");
     }
     Assert(world.FrameOf(0).Translation.Y < 0.3f, "The ragdoll did not come down.");
+
+    // Released, the bodies fall as pieces: the chain is not held together, and each still comes to the floor.
+    var apart = new RagdollWorld(bodies, frames);
+    apart.Release();
+    for (int i = 0; i < 600; i++) apart.Step(1f / 60f);
+    for (int i = 0; i < 3; i++) Assert(apart.FrameOf(i).Translation.Y > -0.01f && apart.FrameOf(i).Translation.Y < 0.3f, $"Piece {i} did not come to the floor.");
 }

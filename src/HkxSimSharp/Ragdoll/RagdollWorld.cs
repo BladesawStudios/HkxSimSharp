@@ -5,8 +5,8 @@ namespace HkxSimSharp.Ragdoll;
 /// <summary>The limits of a ragdoll joint, in radians: how far the body may swing from its rest pose, and twist about its own axis.</summary>
 /// <remarks>
 /// A joint is a ball at the origin of the body's frame, so the body hangs from its parent at a point. Twist is the turn about the body's X axis, within <see cref="TwistMin"/> and <see cref="TwistMax"/>.
-/// What is left of the rotation is a swing, taken as turns about Y and Z: the one about Y is within <see cref="ConeAngle"/> either side of <see cref="ConeOffset"/>, and the one about Z within
-/// <see cref="PlaneMin"/> and <see cref="PlaneMax"/>. A hinge turns only about Z, within <see cref="HingeMin"/> and <see cref="HingeMax"/>. This is how the game's ragdoll parameters are named, read as
+/// What is left of the rotation is a swing, taken as turns about Y and Z: the one about Z is within <see cref="PlaneMin"/> and <see cref="PlaneMax"/>, and the whole swing is within <see cref="ConeAngle"/> as a circle,
+/// as Havok's ragdoll limits are described. <see cref="ConeOffset"/> is kept but not used: where the game centres the cone could not be found in its code, so the cone is centred on the rest pose. A hinge turns only about Z, within <see cref="HingeMin"/> and <see cref="HingeMax"/>. This is how the game's ragdoll parameters are named, read as
 /// the simplest limits that fit the names; Havok's own cone is not an exact match.
 /// </remarks>
 public sealed record RagdollJoint(float ConeAngle, float ConeOffset, float TwistMin, float TwistMax, float PlaneMin, float PlaneMax, bool Hinge = false, float HingeMin = 0f, float HingeMax = 0f);
@@ -35,7 +35,7 @@ public sealed class RagdollWorld
     private readonly Vector3[] _centre, _position, _previous, _velocity, _spin, _jointParent;
     private readonly Quaternion[] _turn, _turnPrevious, _rest;
     private readonly float[] _inverseMass, _inverseInertia;
-    private readonly bool[] _onFloor;
+    private readonly bool[] _onFloor, _released;
 
     public RagdollWorld(IReadOnlyList<RagdollBody> bodies, IReadOnlyList<Matrix4x4> frames)
     {
@@ -53,6 +53,7 @@ public sealed class RagdollWorld
         _inverseMass = new float[n];
         _inverseInertia = new float[n];
         _onFloor = new bool[n];
+        _released = new bool[n];
 
         for (int i = 0; i < n; i++)
         {
@@ -73,6 +74,12 @@ public sealed class RagdollWorld
     public float FloorHeight { get; set; }
 
     public int Count => _bodies.Length;
+
+    // Lets bodies go from their parents, so they fall as pieces, as a bone enemy's arm and head do when it is knocked apart. With none named, every joint is let go.
+    public void Release(IEnumerable<int>? bodies = null)
+    {
+        foreach (int i in bodies ?? Enumerable.Range(0, _bodies.Length)) if ((uint)i < (uint)_released.Length) _released[i] = true;
+    }
 
     // Puts every body where a pose has its frame, at rest.
     public void Reset(IReadOnlyList<Matrix4x4> frames)
@@ -125,7 +132,7 @@ public sealed class RagdollWorld
             {
                 for (int i = 0; i < _bodies.Length; i++)
                 {
-                    if (_bodies[i].Parent >= 0) SolveJoint(i);
+                    if (_bodies[i].Parent >= 0 && !_released[i]) SolveJoint(i);
                     Floor(i);
                 }
             }
@@ -191,8 +198,16 @@ public sealed class RagdollWorld
         else
         {
             twistAngle = Math.Clamp(twistAngle, joint.TwistMin, joint.TwistMax);
-            y = Math.Clamp(y, joint.ConeOffset - joint.ConeAngle, joint.ConeOffset + joint.ConeAngle);
+
+            // The plane limit bounds the turn about Z, and the cone the whole swing, as a circle: the angle between the two twist axes is at most the cone angle.
             z = Math.Clamp(z, joint.PlaneMin, joint.PlaneMax);
+            float swingAngle = MathF.Sqrt(y * y + z * z);
+            if (swingAngle > joint.ConeAngle && swingAngle > 1e-6f)
+            {
+                float shrink = joint.ConeAngle / swingAngle;
+                y *= shrink;
+                z *= shrink;
+            }
         }
 
         Quaternion allowed = FromRotationVector(new Vector3(0f, y, z)) * Quaternion.CreateFromAxisAngle(Vector3.UnitX, twistAngle);
