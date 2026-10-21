@@ -55,6 +55,9 @@ public sealed class ClothSolver
         set => _instance.GravityScale = value;
     }
 
+    /// <summary>Capsules besides the cloth's own colliders that its particles stay out of, in the cloth's space, until set again.</summary>
+    public void SetObstacles(IReadOnlyList<Obstacle> obstacles) => _instance.Obstacles = [.. obstacles];
+
     public void Reset() => _instance.Reset();
 
     public void Step(float deltaTime, ReadOnlySpan<Matrix4x4> inputBoneTransforms) =>

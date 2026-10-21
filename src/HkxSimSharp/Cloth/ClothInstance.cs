@@ -26,6 +26,9 @@ internal sealed class ClothInstance
     public bool IsEnabled { get; set; } = true;
     public Vector3 Wind { get; set; } = Vector3.Zero;
 
+    // Capsules of other bodies the free particles are kept out of, in the cloth's space.
+    public Obstacle[] Obstacles { get; set; } = [];
+
     /// <summary>Multiplies authored gravity - see <c>PbdSolver.Integrate</c>'s remarks on why this is an artistic knob, not a data-derived one.</summary>
     public float GravityScale { get; set; } = 1f;
 
@@ -905,8 +908,11 @@ internal sealed class ClothInstance
                         if (entry == -1)
                         {
                             if (enableCollision)
+                            {
                                 collisionFrame.Solve(op.UseAllInstanceCollidables,
                                     op.InstanceCollidablesUsed, subDt);
+                                ExternalCollision.Solve(runtime, Obstacles);
+                            }
                         }
                         else if ((uint)entry < (uint)sets.Length)
                         {
@@ -919,8 +925,11 @@ internal sealed class ClothInstance
                     PbdSolver.SolveConstraints(runtime, sets, refPositions);
 
                     if (enableCollision)
+                    {
                         collisionFrame.Solve(op.UseAllInstanceCollidables,
                             op.InstanceCollidablesUsed, subDt);
+                        ExternalCollision.Solve(runtime, Obstacles);
+                    }
                 }
             }
         }
