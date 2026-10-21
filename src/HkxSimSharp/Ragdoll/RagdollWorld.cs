@@ -40,6 +40,7 @@ public sealed partial class RagdollWorld
     private readonly float[] _floorPush;
     private readonly Vector3[] _contactNormal;
     private int _calm;
+    private float _step;
 
     public RagdollWorld(IReadOnlyList<RagdollBody> bodies, IReadOnlyList<Matrix4x4> frames)
     {
@@ -231,7 +232,7 @@ public sealed partial class RagdollWorld
         if (Asleep) return;
         if (!_settled) Settle();
 
-        float h = seconds / SubSteps;
+        float h = _step = seconds / SubSteps;
         for (int s = 0; s < SubSteps; s++)
         {
             for (int i = 0; i < _bodies.Length; i++)

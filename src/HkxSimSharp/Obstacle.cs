@@ -4,10 +4,10 @@ namespace HkxSimSharp;
 
 /// <summary>A capsule other than a simulation's own that its bodies or particles cannot go through, in the space the simulation works in; a sphere has both ends the same.</summary>
 /// <remarks>
-/// Share is how much of a contact the ragdoll gives way for: 1 for something that does not move for it (a standing actor's body, a wall), and a half for another ragdoll, which gives way the other half itself. Cloth
+/// Velocity is how fast it moves, which a body that meets it takes its share of. Share is how much of a contact the ragdoll gives way for: 1 for something that does not move for it (a standing actor's body, a wall), and a half for another ragdoll, which gives way the other half itself. Cloth
 /// ignores it, since cloth moves nothing it touches.
 /// </remarks>
-public readonly record struct Obstacle(Vector3 A, Vector3 B, float Radius, float Share = 1f)
+public readonly record struct Obstacle(Vector3 A, Vector3 B, float Radius, float Share = 1f, Vector3 Velocity = default)
 {
     // The nearest points of two segments (Ericson, Real-Time Collision Detection 5.1.9); a segment with both ends the same is a point.
     public static void Closest(Vector3 p1, Vector3 q1, Vector3 p2, Vector3 q2, out Vector3 c1, out Vector3 c2)

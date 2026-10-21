@@ -7,6 +7,9 @@ public sealed partial class RagdollWorld
     // The furthest a contact pushes a body out in one go. A ragdoll that begins inside another actor's shape (two actors placed overlapping) is eased out of it, not thrown out of it.
     private const float MostEase = 0.02f;
 
+    // How far ahead of touching a contact is already felt, so a body moving fast enough to cross a shape in a step still meets it.
+    private const float Lookahead = 0.5f;
+
     private Obstacle[] _obstacles = [];
 
     // What the bodies collide with besides the floor, from now until it is set again. The caller keeps it current as the shapes move.
@@ -17,7 +20,7 @@ public sealed partial class RagdollWorld
     {
         Obstacle[] shapes = new Obstacle[_bodies.Length];
         for (int i = 0; i < shapes.Length; i++)
-            shapes[i] = new Obstacle(End(i, _bodies[i].A), End(i, _bodies[i].B), _bodies[i].Radius, share);
+            shapes[i] = new Obstacle(End(i, _bodies[i].A), End(i, _bodies[i].B), _bodies[i].Radius, share, _velocity[i]);
         return shapes;
     }
 
@@ -44,20 +47,26 @@ public sealed partial class RagdollWorld
         Vector3 middle = (a + b) * 0.5f;
         foreach (Obstacle o in _obstacles)
         {
-            float near = reach + Vector3.Distance(o.A, o.B) * 0.5f + o.Radius;
+            float near = reach + Vector3.Distance(o.A, o.B) * 0.5f + o.Radius + Lookahead;
             if (Vector3.DistanceSquared(middle, (o.A + o.B) * 0.5f) > near * near) continue;
 
             Obstacle.Closest(a, b, o.A, o.B, out Vector3 mine, out Vector3 theirs);
             Vector3 apart = mine - theirs;
             float distance = apart.Length(), depth = radius + o.Radius - distance;
-            if (depth <= 0f) continue;
 
             // Centres on one another leave no way out to read from them: out the way the floor is, which is always a way.
             Vector3 n = distance > 1e-5f ? apart / distance : FloorNormal;
-            float eased = MathF.Min(depth, MostEase);
             Vector3 r = mine - _position[i];
-            Move(i, r, n * (eased * o.Share / Weight(i, r, n)));
-            Touch(i, n, eased);
+
+            // What the body gains or loses on meeting it: the speed it closes at, taken up as far as the obstacle's share of the meeting. A moving obstacle (another ragdoll) hands its speed on,
+            // and a body about to touch it takes the blow in the step before it does, so a fast one is not through before it is felt.
+            float closing = -Vector3.Dot(_velocity[i] + Vector3.Cross(_spin[i], r) - o.Velocity, n);
+            float approach = MathF.Max(closing, 0f) * _step;
+            if (depth + approach <= 0f) continue;
+
+            float eased = MathF.Min(MathF.Max(depth, 0f), MostEase);
+            Move(i, r, n * ((eased + approach) * o.Share / Weight(i, r, n)));
+            if (depth > 0f) Touch(i, n, eased);
         }
     }
 }
