@@ -27,7 +27,7 @@ public sealed record RagdollBody(int Parent, Vector3 A, Vector3 B, float Radius,
 /// A body's frame is its bone's; <see cref="FrameOf"/> gives where that frame is. Everything is in one space, which is the actor's.
 /// </para>
 /// </remarks>
-public sealed class RagdollWorld
+public sealed partial class RagdollWorld
 {
     private const int SubSteps = 6, Iterations = 6;
     private const float MaxSpeed = 120f, MaxSpin = 60f;
@@ -38,6 +38,7 @@ public sealed class RagdollWorld
     private readonly float[] _inverseMass, _inverseInertia;
     private readonly bool[] _onFloor, _released;
     private readonly float[] _floorPush;
+    private readonly Vector3[] _contactNormal;
     private int _calm;
 
     public RagdollWorld(IReadOnlyList<RagdollBody> bodies, IReadOnlyList<Matrix4x4> frames)
@@ -58,6 +59,7 @@ public sealed class RagdollWorld
         _onFloor = new bool[n];
         _released = new bool[n];
         _floorPush = new float[n];
+        _contactNormal = new Vector3[n];
 
         for (int i = 0; i < n; i++)
         {
@@ -250,6 +252,7 @@ public sealed class RagdollWorld
                 {
                     if (_bodies[i].Parent >= 0 && !_released[i]) SolveJoint(i);
                     Floor(i);
+                    Collide(i);
                 }
             }
 
@@ -272,7 +275,7 @@ public sealed class RagdollWorld
                 if (_onFloor[i])
                 {
                     // Coulomb friction: the speed along the floor falls by at most the friction coefficient times what the floor pushed the body up by.
-                    Vector3 along = _velocity[i] - FloorNormal * Vector3.Dot(_velocity[i], FloorNormal);
+                    Vector3 along = _velocity[i] - _contactNormal[i] * Vector3.Dot(_velocity[i], _contactNormal[i]);
                     float speed = along.Length(), lost = MathF.Min(speed, FloorFriction * _floorPush[i] / h);
                     if (speed > 1e-6f) _velocity[i] -= along / speed * lost;
                     _spin[i] *= MathF.Max(0f, 1f - FloorRolling * h);
@@ -344,8 +347,7 @@ public sealed class RagdollWorld
 
         Vector3 r = Vector3.Transform(end - _centre[i], _turn[i]), n = FloorNormal;
         Move(i, r, n * (depth / Weight(i, r, n)));
-        _onFloor[i] = true;
-        _floorPush[i] = MathF.Max(_floorPush[i], depth);
+        Touch(i, n, depth);
     }
 
     // How readily a body gives to a push along a direction at a point r from its centre: the inverse mass and the turn it would take.
