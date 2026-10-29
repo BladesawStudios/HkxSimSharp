@@ -54,7 +54,7 @@ internal static class PbdSolver
         if (dt <= 0f) return;
 
         Vector3 gravity = runtime.Gravity * gravityScale;
-        float damping = runtime.GlobalDamping;
+        float damping = runtime.GlobalDamping * runtime.DampingScale;
         float dampingFactor = MathF.Max(0f, 1f - damping * dt);
 
         var pos = runtime.Positions;
@@ -154,7 +154,7 @@ internal static class PbdSolver
             float dist = diff.Length();
             if (dist < 1e-9f) continue;
 
-            float factor = (dist - link.RestLength) * link.Stiffness;
+            float factor = (dist - link.RestLength) * link.Stiffness * runtime.StiffnessScale;
             Vector3 unitAB = -diff / dist;
 
             pos[pA] += unitAB * factor * invMass[pA];
@@ -190,7 +190,7 @@ internal static class PbdSolver
             if (dist < 1e-9f) continue;
 
             float error = MathF.Min(link.RestLength - dist, 0f);
-            pos[pB] += (diff / dist) * (error * link.Stiffness);
+            pos[pB] += (diff / dist) * (error * link.Stiffness * runtime.StiffnessScale);
         }
     }
 
@@ -221,7 +221,7 @@ internal static class PbdSolver
             if (dist <= link.RestLength && !isOnCompression) continue;
 
             float targetLength = isOnCompression ? link.CompressionLength : link.RestLength;
-            float factor = (dist - targetLength) * link.Stiffness;
+            float factor = (dist - targetLength) * link.Stiffness * runtime.StiffnessScale;
             Vector3 unitAB = -diff / dist;
 
             pos[pA] += unitAB * factor * invMass[pA];
@@ -260,7 +260,7 @@ internal static class PbdSolver
             float stretch = MathF.Max(0f, dist - link.StretchMaxLength);
             if (bend == 0f && stretch == 0f) continue;
 
-            float factor = stretch * link.StretchStiffness - bend * link.BendStiffness;
+            float factor = (stretch * link.StretchStiffness - bend * link.BendStiffness) * runtime.StiffnessScale;
             Vector3 unitAB = -diff / dist;
 
             pos[pA] += unitAB * factor * invMass[pA];
@@ -295,10 +295,10 @@ internal static class PbdSolver
             Vector3 r = pos[pA] * link.WeightA + pos[pB] * link.WeightB +
                         pos[pC] * link.WeightC + pos[pD] * link.WeightD;
 
-            pos[pA] += r * (link.BendStiffness * link.WeightA * invMass[pA]);
-            pos[pB] += r * (link.BendStiffness * link.WeightB * invMass[pB]);
-            pos[pC] += r * (link.BendStiffness * link.WeightC * invMass[pC]);
-            pos[pD] += r * (link.BendStiffness * link.WeightD * invMass[pD]);
+            pos[pA] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightA * invMass[pA]);
+            pos[pB] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightB * invMass[pB]);
+            pos[pC] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightC * invMass[pC]);
+            pos[pD] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightD * invMass[pD]);
         }
     }
 
@@ -355,10 +355,10 @@ internal static class PbdSolver
                         pos[pC] * link.WeightC + pos[pD] * link.WeightD +
                         restOffset * initialRestCurvature;
 
-            pos[pA] += r * (link.BendStiffness * link.WeightA * invMass[pA]);
-            pos[pB] += r * (link.BendStiffness * link.WeightB * invMass[pB]);
-            pos[pC] += r * (link.BendStiffness * link.WeightC * invMass[pC]);
-            pos[pD] += r * (link.BendStiffness * link.WeightD * invMass[pD]);
+            pos[pA] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightA * invMass[pA]);
+            pos[pB] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightB * invMass[pB]);
+            pos[pC] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightC * invMass[pC]);
+            pos[pD] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightD * invMass[pD]);
         }
     }
 
@@ -403,7 +403,7 @@ internal static class PbdSolver
             if (invMass[pIdx] <= 0f)
                 continue; // Fixed particle already locked
 
-            float stiffness = Math.Clamp(c.Stiffness * setStiffness, 0f, 1f);
+            float stiffness = Math.Clamp(c.Stiffness * setStiffness * runtime.StiffnessScale, 0f, 1f);
             if (stiffness <= 0f)
                 continue;
 

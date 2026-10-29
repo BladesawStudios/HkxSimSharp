@@ -55,6 +55,26 @@ public sealed class ClothSolver
         set => _instance.GravityScale = value;
     }
 
+    /// <summary>Scales the stiffness of every constraint of every piece, as authored at 1.</summary>
+    public float StiffnessScale
+    {
+        get => _instance.Runtimes.Count == 0 ? 1f : _instance.Runtimes[0].StiffnessScale;
+        set
+        {
+            foreach (SimClothRuntime runtime in _instance.Runtimes) runtime.StiffnessScale = value;
+        }
+    }
+
+    /// <summary>Scales the damping of every piece, as authored at 1.</summary>
+    public float DampingScale
+    {
+        get => _instance.Runtimes.Count == 0 ? 1f : _instance.Runtimes[0].DampingScale;
+        set
+        {
+            foreach (SimClothRuntime runtime in _instance.Runtimes) runtime.DampingScale = value;
+        }
+    }
+
     /// <summary>Capsules besides the cloth's own colliders that its particles stay out of, in the cloth's space, until set again.</summary>
     public void SetObstacles(IReadOnlyList<Obstacle> obstacles) => _instance.Obstacles = [.. obstacles];
 
