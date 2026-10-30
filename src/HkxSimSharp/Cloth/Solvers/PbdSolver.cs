@@ -54,8 +54,11 @@ internal static class PbdSolver
         if (dt <= 0f) return;
 
         Vector3 gravity = runtime.Gravity * gravityScale;
-        float damping = runtime.GlobalDamping * runtime.DampingScale;
+        float damping = runtime.GlobalDamping * runtime.DampingScale + runtime.LinearDrag;
         float dampingFactor = MathF.Max(0f, 1f - damping * dt);
+        Vector3 spin = runtime.AngularDrag > 0f ? SpinOf(runtime, dt) : Vector3.Zero;
+        Vector3 centre = spin == Vector3.Zero ? Vector3.Zero : CentreOf(runtime);
+        float spinShare = MathF.Min(runtime.AngularDrag * dt, 1f);
 
         var pos = runtime.Positions;
         var prevPos = runtime.PrevPositions;
@@ -73,12 +76,52 @@ internal static class PbdSolver
 
             // Apply damping and external gravity
             v = v * dampingFactor + gravity * dt;
+
+            // The spin of the whole piece about its centre is taken out a share at a time, so a hair that is whirled round does not keep whirling.
+            if (spinShare > 0f) v -= Vector3.Cross(spin, pos[i] - centre) * spinShare;
             vel[i] = v;
 
             // Advance positions
             prevPos[i] = pos[i];
             pos[i] += v * dt;
         }
+    }
+
+    // The mass-weighted centre of the particles that move.
+    private static Vector3 CentreOf(SimClothRuntime runtime)
+    {
+        Vector3 sum = Vector3.Zero;
+        float mass = 0f;
+        for (int i = 0; i < runtime.ParticleCount; i++)
+        {
+            if (runtime.IsFixed[i] || runtime.InvMasses[i] <= 0f) continue;
+            float m = 1f / runtime.InvMasses[i];
+            sum += runtime.Positions[i] * m;
+            mass += m;
+        }
+        return mass > 0f ? sum / mass : Vector3.Zero;
+    }
+
+    // The angular velocity of the moving particles about their centre, from the angular momentum over the inertia: zero where there is none to speak of.
+    private static Vector3 SpinOf(SimClothRuntime runtime, float dt)
+    {
+        Vector3 centre = CentreOf(runtime);
+        Vector3 momentum = Vector3.Zero;
+        System.Numerics.Matrix4x4 inertia = default;
+        for (int i = 0; i < runtime.ParticleCount; i++)
+        {
+            if (runtime.IsFixed[i] || runtime.InvMasses[i] <= 0f) continue;
+            float m = 1f / runtime.InvMasses[i];
+            Vector3 r = runtime.Positions[i] - centre;
+            Vector3 v = (runtime.Positions[i] - runtime.PrevPositions[i]) / dt;
+            momentum += m * Vector3.Cross(r, v);
+            float r2 = r.LengthSquared();
+            inertia.M11 += m * (r2 - r.X * r.X); inertia.M22 += m * (r2 - r.Y * r.Y); inertia.M33 += m * (r2 - r.Z * r.Z);
+            inertia.M12 -= m * r.X * r.Y; inertia.M13 -= m * r.X * r.Z; inertia.M23 -= m * r.Y * r.Z;
+        }
+        inertia.M21 = inertia.M12; inertia.M31 = inertia.M13; inertia.M32 = inertia.M23;
+        inertia.M44 = 1f;
+        return System.Numerics.Matrix4x4.Invert(inertia, out var inverse) ? Vector3.TransformNormal(momentum, inverse) : Vector3.Zero;
     }
 
     /// <summary>
