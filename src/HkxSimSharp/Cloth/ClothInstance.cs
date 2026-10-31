@@ -26,6 +26,9 @@ internal sealed class ClothInstance
     public bool IsEnabled { get; set; } = true;
     public Vector3 Wind { get; set; } = Vector3.Zero;
 
+    // How long the wind has blown on this cloth, which is what its ripple runs on.
+    private float _windSeconds;
+
     // Capsules of other bodies the free particles are kept out of, in the cloth's space.
     public Obstacle[] Obstacles { get; set; } = [];
 
@@ -817,18 +820,6 @@ internal sealed class ClothInstance
         int iterations = Math.Max(1, (int)op.NumberOfSolveIterations);
         float subDt = dt / subSteps;
 
-        // Apply external wind to particle velocities
-        if (Wind != Vector3.Zero)
-        {
-            for (int i = 0; i < runtime.ParticleCount; i++)
-            {
-                if (!runtime.IsFixed[i])
-                {
-                    runtime.Positions[i] += Wind * (0.01f * subDt);
-                }
-            }
-        }
-
         var refPositions = Buffers.Length > 0 ? Buffers[0] : Array.Empty<Vector3>();
 
         // Anchor particles must WALK to their newly-skinned positions across the sub-steps, not jump
@@ -887,7 +878,8 @@ internal sealed class ClothInstance
             }
 
             // Verlet predict
-            PbdSolver.Integrate(runtime, subDt, GravityScale);
+            _windSeconds += subDt;
+            PbdSolver.Integrate(runtime, subDt, GravityScale, Wind, _windSeconds);
 
             // Solver iterations. When the piece authors an execution order, follow the real
             // hclSimulateOperator::_solveTaskOrderedCpu: walk that list, treating -1 as "collide

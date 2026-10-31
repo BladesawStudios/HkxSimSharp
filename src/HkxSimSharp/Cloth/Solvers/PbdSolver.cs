@@ -32,6 +32,9 @@ namespace HkxSimSharp.Cloth.Solvers;
 /// </summary>
 internal static class PbdSolver
 {
+    // How much a gust varies along the cloth, how many radians of it there are to a metre, and how fast it runs in radians a second.
+    private const float WindRipple = 0.35f, WindRippleCycles = 9f, WindRippleRate = 11f;
+
     /// <summary>
     /// Performs Verlet integration predicting particle positions under velocity, gravity, and damping.
     /// </summary>
@@ -49,11 +52,14 @@ internal static class PbdSolver
     /// </param>
     /// <param name="runtime">Mutable particle state to integrate.</param>
     /// <param name="dt">Simulation time step in seconds.</param>
-    public static void Integrate(SimClothRuntime runtime, float dt, float gravityScale = 1f)
+    /// <param name="wind">Acceleration of the wind, in the cloth's space. It is a force like gravity, so it comes to the same thing however the time is cut up.</param>
+    /// <param name="windSeconds">How long the wind has blown, which runs a ripple along it: without one every particle is pushed alike and the piece only leans.</param>
+    public static void Integrate(SimClothRuntime runtime, float dt, float gravityScale = 1f, Vector3 wind = default, float windSeconds = 0f)
     {
         if (dt <= 0f) return;
 
         Vector3 gravity = runtime.Gravity * gravityScale;
+        Vector3 windAlong = wind == Vector3.Zero ? Vector3.Zero : Vector3.Normalize(wind);
         float damping = runtime.GlobalDamping * runtime.DampingScale + runtime.LinearDrag;
         float dampingFactor = MathF.Max(0f, 1f - damping * dt);
         Vector3 spin = runtime.AngularDrag > 0f ? SpinOf(runtime, dt) : Vector3.Zero;
@@ -76,6 +82,8 @@ internal static class PbdSolver
 
             // Apply damping and external gravity
             v = v * dampingFactor + gravity * dt;
+            if (wind != Vector3.Zero)
+                v += wind * (dt * (1f + WindRipple * MathF.Sin(Vector3.Dot(pos[i], windAlong) * WindRippleCycles - windSeconds * WindRippleRate)));
 
             // The spin of the whole piece about its centre is taken out a share at a time, so a hair that is whirled round does not keep whirling.
             if (spinShare > 0f) v -= Vector3.Cross(spin, pos[i] - centre) * spinShare;
