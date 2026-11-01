@@ -33,6 +33,18 @@ public sealed class SimClothRuntime
     public Vector3 Gravity { get; set; }
     public float GlobalDamping { get; set; }
 
+    /// <summary>Scales every constraint's stiffness, as authored at 1: lower is softer and stretchier.</summary>
+    public float StiffnessScale { get; set; } = 1f;
+
+    /// <summary>Scales the damping the cloth loses its motion with, as authored at 1.</summary>
+    public float DampingScale { get; set; } = 1f;
+
+    /// <summary>The share of its speed each free particle loses every second, on top of the damping the cloth has.</summary>
+    public float LinearDrag { get; set; }
+
+    /// <summary>The share of its spin about its own centre of mass the whole piece loses every second.</summary>
+    public float AngularDrag { get; set; }
+
     public SimClothRuntime(HclSimClothData data)
     {
         Data = data ?? throw new ArgumentNullException(nameof(data));

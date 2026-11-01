@@ -32,6 +32,9 @@ namespace HkxSimSharp.Cloth.Solvers;
 /// </summary>
 internal static class PbdSolver
 {
+    // How much a gust varies along the cloth, how many radians of it there are to a metre, and how fast it runs in radians a second.
+    private const float WindRipple = 0.35f, WindRippleCycles = 9f, WindRippleRate = 11f;
+
     /// <summary>
     /// Performs Verlet integration predicting particle positions under velocity, gravity, and damping.
     /// </summary>
@@ -49,13 +52,19 @@ internal static class PbdSolver
     /// </param>
     /// <param name="runtime">Mutable particle state to integrate.</param>
     /// <param name="dt">Simulation time step in seconds.</param>
-    public static void Integrate(SimClothRuntime runtime, float dt, float gravityScale = 1f)
+    /// <param name="wind">Acceleration of the wind, in the cloth's space. It is a force like gravity, so it comes to the same thing however the time is cut up.</param>
+    /// <param name="windSeconds">How long the wind has blown, which runs a ripple along it: without one every particle is pushed alike and the piece only leans.</param>
+    public static void Integrate(SimClothRuntime runtime, float dt, float gravityScale = 1f, Vector3 wind = default, float windSeconds = 0f)
     {
         if (dt <= 0f) return;
 
         Vector3 gravity = runtime.Gravity * gravityScale;
-        float damping = runtime.GlobalDamping;
+        Vector3 windAlong = wind == Vector3.Zero ? Vector3.Zero : Vector3.Normalize(wind);
+        float damping = runtime.GlobalDamping * runtime.DampingScale + runtime.LinearDrag;
         float dampingFactor = MathF.Max(0f, 1f - damping * dt);
+        Vector3 spin = runtime.AngularDrag > 0f ? SpinOf(runtime, dt) : Vector3.Zero;
+        Vector3 centre = spin == Vector3.Zero ? Vector3.Zero : CentreOf(runtime);
+        float spinShare = MathF.Min(runtime.AngularDrag * dt, 1f);
 
         var pos = runtime.Positions;
         var prevPos = runtime.PrevPositions;
@@ -73,12 +82,54 @@ internal static class PbdSolver
 
             // Apply damping and external gravity
             v = v * dampingFactor + gravity * dt;
+            if (wind != Vector3.Zero)
+                v += wind * (dt * (1f + WindRipple * MathF.Sin(Vector3.Dot(pos[i], windAlong) * WindRippleCycles - windSeconds * WindRippleRate)));
+
+            // The spin of the whole piece about its centre is taken out a share at a time, so a hair that is whirled round does not keep whirling.
+            if (spinShare > 0f) v -= Vector3.Cross(spin, pos[i] - centre) * spinShare;
             vel[i] = v;
 
             // Advance positions
             prevPos[i] = pos[i];
             pos[i] += v * dt;
         }
+    }
+
+    // The mass-weighted centre of the particles that move.
+    private static Vector3 CentreOf(SimClothRuntime runtime)
+    {
+        Vector3 sum = Vector3.Zero;
+        float mass = 0f;
+        for (int i = 0; i < runtime.ParticleCount; i++)
+        {
+            if (runtime.IsFixed[i] || runtime.InvMasses[i] <= 0f) continue;
+            float m = 1f / runtime.InvMasses[i];
+            sum += runtime.Positions[i] * m;
+            mass += m;
+        }
+        return mass > 0f ? sum / mass : Vector3.Zero;
+    }
+
+    // The angular velocity of the moving particles about their centre, from the angular momentum over the inertia: zero where there is none to speak of.
+    private static Vector3 SpinOf(SimClothRuntime runtime, float dt)
+    {
+        Vector3 centre = CentreOf(runtime);
+        Vector3 momentum = Vector3.Zero;
+        System.Numerics.Matrix4x4 inertia = default;
+        for (int i = 0; i < runtime.ParticleCount; i++)
+        {
+            if (runtime.IsFixed[i] || runtime.InvMasses[i] <= 0f) continue;
+            float m = 1f / runtime.InvMasses[i];
+            Vector3 r = runtime.Positions[i] - centre;
+            Vector3 v = (runtime.Positions[i] - runtime.PrevPositions[i]) / dt;
+            momentum += m * Vector3.Cross(r, v);
+            float r2 = r.LengthSquared();
+            inertia.M11 += m * (r2 - r.X * r.X); inertia.M22 += m * (r2 - r.Y * r.Y); inertia.M33 += m * (r2 - r.Z * r.Z);
+            inertia.M12 -= m * r.X * r.Y; inertia.M13 -= m * r.X * r.Z; inertia.M23 -= m * r.Y * r.Z;
+        }
+        inertia.M21 = inertia.M12; inertia.M31 = inertia.M13; inertia.M32 = inertia.M23;
+        inertia.M44 = 1f;
+        return System.Numerics.Matrix4x4.Invert(inertia, out var inverse) ? Vector3.TransformNormal(momentum, inverse) : Vector3.Zero;
     }
 
     /// <summary>
@@ -154,7 +205,7 @@ internal static class PbdSolver
             float dist = diff.Length();
             if (dist < 1e-9f) continue;
 
-            float factor = (dist - link.RestLength) * link.Stiffness;
+            float factor = (dist - link.RestLength) * link.Stiffness * runtime.StiffnessScale;
             Vector3 unitAB = -diff / dist;
 
             pos[pA] += unitAB * factor * invMass[pA];
@@ -190,7 +241,7 @@ internal static class PbdSolver
             if (dist < 1e-9f) continue;
 
             float error = MathF.Min(link.RestLength - dist, 0f);
-            pos[pB] += (diff / dist) * (error * link.Stiffness);
+            pos[pB] += (diff / dist) * (error * link.Stiffness * runtime.StiffnessScale);
         }
     }
 
@@ -221,7 +272,7 @@ internal static class PbdSolver
             if (dist <= link.RestLength && !isOnCompression) continue;
 
             float targetLength = isOnCompression ? link.CompressionLength : link.RestLength;
-            float factor = (dist - targetLength) * link.Stiffness;
+            float factor = (dist - targetLength) * link.Stiffness * runtime.StiffnessScale;
             Vector3 unitAB = -diff / dist;
 
             pos[pA] += unitAB * factor * invMass[pA];
@@ -260,7 +311,7 @@ internal static class PbdSolver
             float stretch = MathF.Max(0f, dist - link.StretchMaxLength);
             if (bend == 0f && stretch == 0f) continue;
 
-            float factor = stretch * link.StretchStiffness - bend * link.BendStiffness;
+            float factor = (stretch * link.StretchStiffness - bend * link.BendStiffness) * runtime.StiffnessScale;
             Vector3 unitAB = -diff / dist;
 
             pos[pA] += unitAB * factor * invMass[pA];
@@ -295,10 +346,10 @@ internal static class PbdSolver
             Vector3 r = pos[pA] * link.WeightA + pos[pB] * link.WeightB +
                         pos[pC] * link.WeightC + pos[pD] * link.WeightD;
 
-            pos[pA] += r * (link.BendStiffness * link.WeightA * invMass[pA]);
-            pos[pB] += r * (link.BendStiffness * link.WeightB * invMass[pB]);
-            pos[pC] += r * (link.BendStiffness * link.WeightC * invMass[pC]);
-            pos[pD] += r * (link.BendStiffness * link.WeightD * invMass[pD]);
+            pos[pA] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightA * invMass[pA]);
+            pos[pB] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightB * invMass[pB]);
+            pos[pC] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightC * invMass[pC]);
+            pos[pD] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightD * invMass[pD]);
         }
     }
 
@@ -355,10 +406,10 @@ internal static class PbdSolver
                         pos[pC] * link.WeightC + pos[pD] * link.WeightD +
                         restOffset * initialRestCurvature;
 
-            pos[pA] += r * (link.BendStiffness * link.WeightA * invMass[pA]);
-            pos[pB] += r * (link.BendStiffness * link.WeightB * invMass[pB]);
-            pos[pC] += r * (link.BendStiffness * link.WeightC * invMass[pC]);
-            pos[pD] += r * (link.BendStiffness * link.WeightD * invMass[pD]);
+            pos[pA] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightA * invMass[pA]);
+            pos[pB] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightB * invMass[pB]);
+            pos[pC] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightC * invMass[pC]);
+            pos[pD] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightD * invMass[pD]);
         }
     }
 
@@ -403,7 +454,7 @@ internal static class PbdSolver
             if (invMass[pIdx] <= 0f)
                 continue; // Fixed particle already locked
 
-            float stiffness = Math.Clamp(c.Stiffness * setStiffness, 0f, 1f);
+            float stiffness = Math.Clamp(c.Stiffness * setStiffness * runtime.StiffnessScale, 0f, 1f);
             if (stiffness <= 0f)
                 continue;
 
