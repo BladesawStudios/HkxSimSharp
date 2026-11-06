@@ -32,6 +32,14 @@ namespace HkxSimSharp.Cloth.Solvers;
 /// </summary>
 internal static class PbdSolver
 {
+    // The most a constraint may correct of its own error in one solve. A link moves its ends by error * stiffness * invMass, so one solve takes stiffness * (invMassA + invMassB) of its error away:
+    // at 1 it is all of it, past 1 it overshoots, and past 2 it grows with every solve, which is the cloth that shivers and then flies apart. Authored values are well under 1, so they are not
+    // touched; a stiffness turned up, or a weight turned down (which raises invMass), reaches 1 and stays a rigid constraint instead of an unstable one.
+    private const float MaxGain = 1f;
+
+    // The factor that brings a constraint's gain down to the most it may have; 1 where it is already under.
+    private static float Stable(float gain) => gain > MaxGain ? MaxGain / gain : 1f;
+
     // How much a gust varies along the cloth, how many radians of it there are to a metre, and how fast it runs in radians a second.
     private const float WindRipple = 0.35f, WindRippleCycles = 9f, WindRippleRate = 11f;
 
@@ -205,7 +213,8 @@ internal static class PbdSolver
             float dist = diff.Length();
             if (dist < 1e-9f) continue;
 
-            float factor = (dist - link.RestLength) * link.Stiffness * runtime.StiffnessScale;
+            float stiffness = link.Stiffness * runtime.StiffnessScale;
+            float factor = (dist - link.RestLength) * stiffness * Stable(stiffness * (invMass[pA] + invMass[pB]));
             Vector3 unitAB = -diff / dist;
 
             pos[pA] += unitAB * factor * invMass[pA];
@@ -241,7 +250,7 @@ internal static class PbdSolver
             if (dist < 1e-9f) continue;
 
             float error = MathF.Min(link.RestLength - dist, 0f);
-            pos[pB] += (diff / dist) * (error * link.Stiffness * runtime.StiffnessScale);
+            pos[pB] += (diff / dist) * (error * MathF.Min(link.Stiffness * runtime.StiffnessScale, 1f));
         }
     }
 
@@ -272,7 +281,8 @@ internal static class PbdSolver
             if (dist <= link.RestLength && !isOnCompression) continue;
 
             float targetLength = isOnCompression ? link.CompressionLength : link.RestLength;
-            float factor = (dist - targetLength) * link.Stiffness * runtime.StiffnessScale;
+            float stiffness = link.Stiffness * runtime.StiffnessScale;
+            float factor = (dist - targetLength) * stiffness * Stable(stiffness * (invMass[pA] + invMass[pB]));
             Vector3 unitAB = -diff / dist;
 
             pos[pA] += unitAB * factor * invMass[pA];
@@ -311,7 +321,8 @@ internal static class PbdSolver
             float stretch = MathF.Max(0f, dist - link.StretchMaxLength);
             if (bend == 0f && stretch == 0f) continue;
 
-            float factor = (stretch * link.StretchStiffness - bend * link.BendStiffness) * runtime.StiffnessScale;
+            float gain = MathF.Max(MathF.Abs(link.StretchStiffness), MathF.Abs(link.BendStiffness)) * runtime.StiffnessScale * (invMass[pA] + invMass[pB]);
+            float factor = (stretch * link.StretchStiffness - bend * link.BendStiffness) * runtime.StiffnessScale * Stable(gain);
             Vector3 unitAB = -diff / dist;
 
             pos[pA] += unitAB * factor * invMass[pA];
@@ -346,10 +357,14 @@ internal static class PbdSolver
             Vector3 r = pos[pA] * link.WeightA + pos[pB] * link.WeightB +
                         pos[pC] * link.WeightC + pos[pD] * link.WeightD;
 
-            pos[pA] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightA * invMass[pA]);
-            pos[pB] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightB * invMass[pB]);
-            pos[pC] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightC * invMass[pC]);
-            pos[pD] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightD * invMass[pD]);
+            // The combination r changes by r * k * sum(weight^2 * invMass) in one solve, so that sum is the gain.
+            float bendK = link.BendStiffness * runtime.StiffnessScale;
+            bendK *= Stable(MathF.Abs(bendK) * (link.WeightA * link.WeightA * invMass[pA] + link.WeightB * link.WeightB * invMass[pB] +
+                                                 link.WeightC * link.WeightC * invMass[pC] + link.WeightD * link.WeightD * invMass[pD]));
+            pos[pA] += r * (bendK * link.WeightA * invMass[pA]);
+            pos[pB] += r * (bendK * link.WeightB * invMass[pB]);
+            pos[pC] += r * (bendK * link.WeightC * invMass[pC]);
+            pos[pD] += r * (bendK * link.WeightD * invMass[pD]);
         }
     }
 
@@ -406,10 +421,14 @@ internal static class PbdSolver
                         pos[pC] * link.WeightC + pos[pD] * link.WeightD +
                         restOffset * initialRestCurvature;
 
-            pos[pA] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightA * invMass[pA]);
-            pos[pB] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightB * invMass[pB]);
-            pos[pC] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightC * invMass[pC]);
-            pos[pD] += r * (link.BendStiffness * runtime.StiffnessScale * link.WeightD * invMass[pD]);
+            // The combination r changes by r * k * sum(weight^2 * invMass) in one solve, so that sum is the gain.
+            float bendK = link.BendStiffness * runtime.StiffnessScale;
+            bendK *= Stable(MathF.Abs(bendK) * (link.WeightA * link.WeightA * invMass[pA] + link.WeightB * link.WeightB * invMass[pB] +
+                                                 link.WeightC * link.WeightC * invMass[pC] + link.WeightD * link.WeightD * invMass[pD]));
+            pos[pA] += r * (bendK * link.WeightA * invMass[pA]);
+            pos[pB] += r * (bendK * link.WeightB * invMass[pB]);
+            pos[pC] += r * (bendK * link.WeightC * invMass[pC]);
+            pos[pD] += r * (bendK * link.WeightD * invMass[pD]);
         }
     }
 
