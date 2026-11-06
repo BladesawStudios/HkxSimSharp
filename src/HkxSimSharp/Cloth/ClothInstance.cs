@@ -211,6 +211,26 @@ internal sealed class ClothInstance
             // flap can't "already be on the far side" before collision ever sees it (so it can't get
             // locked to the wrong face either).
             var bindPose = (Matrix4x4[])SkeletonTransforms.Clone();
+
+            // The sweep below only argues about how the body is POSED, so it must not also have to carry the
+            // whole cloth to wherever the actor stands. A cutscene clip puts its root a long way from the bind
+            // pose's origin and turned a long way round it; lerping each bone's position and slerping its
+            // rotation separately from there drags the anchors across the room while the free particles stay
+            // behind, and what the constraints then do to the stretch folds the cloth through the body. Carry
+            // the bind pose, particles and all, rigidly onto the root first, so only the posing is swept.
+            Matrix4x4 carry = RootCarry(bindPose, inputSkeletonTransforms);
+            if (!carry.IsIdentity)
+            {
+                for (int i = 0; i < bindPose.Length; i++) bindPose[i] *= carry;
+                foreach (var runtime in Runtimes)
+                {
+                    for (int i = 0; i < runtime.Positions.Length; i++)
+                    {
+                        runtime.Positions[i] = Vector3.Transform(runtime.Positions[i], carry);
+                        runtime.PrevPositions[i] = Vector3.Transform(runtime.PrevPositions[i], carry);
+                    }
+                }
+            }
             var blended = new Matrix4x4[SkeletonTransforms.Length];
             const int SettleSteps = 12;
             for (int i = 0; i < SettleSteps; i++)
@@ -228,6 +248,30 @@ internal sealed class ClothInstance
         }
 
         RunOnce(dt, inputSkeletonTransforms, referenceFrameDelta, enableCollision: true);
+    }
+
+    /// <summary>
+    /// The rigid move (rotation and translation only, no scale) that takes the bind pose's root bone to where the
+    /// animated skeleton has it, or identity where the skeleton has no usable root.
+    /// </summary>
+    private Matrix4x4 RootCarry(Matrix4x4[] bindPose, ReadOnlySpan<Matrix4x4> target)
+    {
+        if (Skeleton == null) return Matrix4x4.Identity;
+
+        int root = -1;
+        for (int i = 0; i < Skeleton.Bones.Count; i++)
+        {
+            if (Skeleton.Bones[i].ParentIndex < 0) { root = i; break; }
+        }
+        if (root < 0 || root >= bindPose.Length || root >= target.Length) return Matrix4x4.Identity;
+
+        if (!Matrix4x4.Decompose(bindPose[root], out _, out Quaternion fromTurn, out Vector3 fromMove)
+            || !Matrix4x4.Decompose(target[root], out _, out Quaternion toTurn, out Vector3 toMove))
+            return Matrix4x4.Identity;
+
+        Matrix4x4 from = Matrix4x4.CreateFromQuaternion(fromTurn) * Matrix4x4.CreateTranslation(fromMove);
+        Matrix4x4 to = Matrix4x4.CreateFromQuaternion(toTurn) * Matrix4x4.CreateTranslation(toMove);
+        return Matrix4x4.Invert(from, out Matrix4x4 inverse) ? inverse * to : Matrix4x4.Identity;
     }
 
     /// <summary>Per-bone translation-lerp/rotation-slerp blend between two skeleton poses, used only to sweep the priming burst's target pose in smoothly - see <see cref="Step(float, ReadOnlySpan{Matrix4x4}, Matrix4x4)"/>'s remarks.</summary>
