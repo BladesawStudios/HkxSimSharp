@@ -305,6 +305,17 @@ public static class HkxClothAdapter
         _ => System.Array.Empty<float>()
     };
 
+    // A sphere is one hkSphere, the centre and, in its fourth number, the radius.
+    static HclSphereShape ReadSphere(HkObject source)
+    {
+        object? sphere = Field(source, "sphere");
+        if (sphere is HkStruct wrapped && wrapped.Members.Any(m => m.Name == "pos")) sphere = wrapped["pos"];
+        float[] f = Floats(sphere);
+        return f.Length >= 4
+            ? new HclSphereShape { Center = new Vector3(f[0], f[1], f[2]), Radius = f[3] }
+            : new HclSphereShape { Center = Vector3(Field(source, "center")), Radius = Float(source, "radius") };
+    }
+
     static HclCollidable ReadCollidable(HkObject source) => new()
     {
         Name = String(source, "name"),
@@ -327,11 +338,7 @@ public static class HkxClothAdapter
             Radius = Float(source, "radius"),
             CapLenSqrdInv = Float(source, "capLenSqrdInv")
         },
-        "hclSphereShape" => new HclSphereShape
-        {
-            Center = Vector3(Field(source, "center")),
-            Radius = Float(source, "radius")
-        },
+        "hclSphereShape" => ReadSphere(source),
         "hclTaperedCapsuleShape" => new HclTaperedCapsuleShape
         {
             Small = Vector3(Field(source, "small")),
