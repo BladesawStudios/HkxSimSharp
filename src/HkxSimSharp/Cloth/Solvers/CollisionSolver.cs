@@ -59,6 +59,60 @@ internal static class CollisionSolver
                 _current[c] = InterpolateRigid(_from[c], _to[c], t);
         }
 
+        // The farthest a stride of the sweep may take a shape, in metres: well under the thickness of a piece of cloth's
+        // collision radius plus the shape's, so no particle is stepped over between two strides.
+        private const float Stride = 0.01f;
+
+        private const int MostStrides = 96;
+
+        // Moves the collidables from where they were to where they are going in strides, and after each pushes the
+        // particles they have reached out to their surface. Only positions move; the step's own solve still follows.
+        public void Sweep(bool useAllInstanceCollidables, ReadOnlySpan<bool> instanceCollidablesUsed)
+        {
+            float travel = 0f;
+            for (int c = 0; c < _from.Length; c++)
+            {
+                // A turn carries the far end of a shape about a quarter of a metre by its angle.
+                float turn = _angularVelocities[c].Length() * _frameTime;
+                travel = MathF.Max(travel, (_to[c].Translation - _from[c].Translation).Length() + turn * 0.25f);
+            }
+            int strides = Math.Min(MostStrides, (int)MathF.Ceiling(travel / Stride));
+            if (strides < 2) return;
+
+            for (int k = 1; k < strides; k++)
+            {
+                float t = k / (float)strides;
+                for (int c = 0; c < _collidables.Length; c++)
+                {
+                    _current[c] = InterpolateRigid(_from[c], _to[c], t);
+                    if (!_collidables[c].Enabled || _collidables[c].Shape is not { } shape) continue;
+                    if (!useAllInstanceCollidables && (c >= instanceCollidablesUsed.Length || !instanceCollidablesUsed[c])) continue;
+
+                    uint colliderBit = 1u << Math.Min(c, 30);
+                    for (int p = 0; p < _runtime.ParticleCount; p++)
+                    {
+                        if (_runtime.Data.StaticCollisionMasks.Length == _runtime.ParticleCount)
+                        {
+                            if ((_runtime.Data.StaticCollisionMasks[p] & colliderBit) == 0) continue;
+                        }
+                        else if (_runtime.InvMasses[p] == 0f)
+                        {
+                            continue;
+                        }
+
+                        Vector3 at = _runtime.Positions[p];
+                        if (ClosestPoint(shape, _current[c], at, out Vector3 contactPoint, out Vector3 normal, out float signedDistance)
+                            && signedDistance - _runtime.Radii[p] < 0f)
+                            _runtime.Positions[p] = at + normal * (_runtime.Radii[p] - Vector3.Dot(at - contactPoint, normal));
+                    }
+                    }
+            }
+
+            // Back at the start, for the step's own advance to carry them on from.
+            for (int c = 0; c < _current.Length; c++) _current[c] = _from[c];
+        }
+
+
         public void Solve(bool useAllInstanceCollidables, ReadOnlySpan<bool> instanceCollidablesUsed, float timestep)
         {
             for (int c = 0; c < _collidables.Length; c++)

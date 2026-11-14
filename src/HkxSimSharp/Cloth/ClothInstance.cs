@@ -229,6 +229,11 @@ internal sealed class ClothInstance
                         runtime.Positions[i] = Vector3.Transform(runtime.Positions[i], carry);
                         runtime.PrevPositions[i] = Vector3.Transform(runtime.PrevPositions[i], carry);
                     }
+
+                    // The colliders wait at their bind place too, and the first step would sweep them from there to the
+                    // real pose in one frame - a speed that throws particles off the shapes they should rest on.
+                    for (int c = 0; c < runtime.PreviousCollidableTransforms.Length; c++)
+                        runtime.PreviousCollidableTransforms[c] *= carry;
                 }
             }
             var blended = new Matrix4x4[SkeletonTransforms.Length];
@@ -347,6 +352,12 @@ internal sealed class ClothInstance
                     pos[i] = Vector3.Transform(pos[i], blendedDelta);
                     prevPos[i] = Vector3.Transform(prevPos[i], blendedDelta);
                 }
+
+                // The shapes were last where the body was, in last step's space. The cloth has been left where it
+                // was in the world, so the shapes must start there too and travel the actor's whole motion across
+                // the step - which is what the collision sweep below pushes the cloth out of their way with.
+                for (int c = 0; c < runtime.PreviousCollidableTransforms.Length; c++)
+                    runtime.PreviousCollidableTransforms[c] *= blendedDelta;
             }
         }
 
@@ -901,6 +912,11 @@ internal sealed class ClothInstance
             runtime, runtime.Data.Collidables, currentSkeleton,
             runtime.Data.CollidableTransformIndices, runtime.Data.CollidableTransformOffsets,
             Skeleton?.WorldReferencePose, dt);
+
+        // A body that moves into the cloth further in a step than the cloth is thick would be stepped over by the
+        // collision, which only looks at where things are at the end: a particle past the middle of a shape is lifted
+        // out of its far side and stays inside the body. Walk the shapes there in small strides first.
+        if (enableCollision) collisionFrame.Sweep(op.UseAllInstanceCollidables, op.InstanceCollidablesUsed);
 
         for (int step = 0; step < subSteps; step++)
         {
